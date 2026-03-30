@@ -83,6 +83,7 @@ const PayoutsPage = () => {
                       </span>
                     </SelectItem>
                     <SelectItem value="iban">External IBAN</SelectItem>
+                    <SelectItem value="ach">ACH Transfer</SelectItem>
                     <SelectItem value="stripe">Stripe Connect</SelectItem>
                   </SelectContent>
                 </Select>
@@ -119,6 +120,12 @@ const PayoutsPage = () => {
                   ) : (
                     <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="DE89 3704 ..." className="bg-muted border-border font-mono text-sm" />
                   )}
+                </div>
+              )}
+              {method === 'ach' && (
+                <div className="space-y-2">
+                  <Label>ACH Details (account_number|routing_number|beneficiary_name)</Label>
+                  <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="123456789|021000021|John Doe" className="bg-muted border-border font-mono text-sm" />
                 </div>
               )}
               {method === 'stripe' && (
