@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
 
       const [accountNumber, routingNumber, beneficiaryName] = parts;
 
-      const payoutResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/payouts`, {
+    const payoutResponse: Response = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/payouts`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${business.gocardless_access_token}`,
@@ -112,9 +112,9 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           payouts: {
-            amount: Math.round(amount * 100), // Convert to cents
+            amount: Math.round(amount * 100),
             currency: "USD",
-            reference: `Payout ${payout.id}`,
+            reference: `Payout-${Date.now()}`,
             beneficiary: {
               name: beneficiaryName,
               account_number: accountNumber,

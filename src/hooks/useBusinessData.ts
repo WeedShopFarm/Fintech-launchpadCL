@@ -9,7 +9,7 @@ export function useBusiness() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('businesses')
-        .select('*')
+        .select('id, name, country, owner_id, stripe_account_id, created_at, updated_at')
         .eq('owner_id', user!.id)
         .maybeSingle();
       if (error) throw error;
