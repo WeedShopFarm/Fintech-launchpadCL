@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
         // Check if customer has a GoCardless ID
         const { data: customerData } = await adminClient
           .from("customers")
-          .select("gocardless_id, iban")
+          .select("gocardless_id, iban, name")
           .eq("id", customer_id)
           .single();
 
