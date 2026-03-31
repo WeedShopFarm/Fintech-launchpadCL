@@ -242,19 +242,19 @@ export function usePayouts() {
 
 export function useCreatePayout() {
   const qc = useQueryClient();
-  const { user } = useAuth();
   return useMutation({
     mutationFn: async (input: { amount: number; method: string; destination: string }) => {
-      const { data, error } = await supabase.from('payouts').insert({
-        user_id: user!.id,
-        amount: input.amount,
-        method: input.method,
-        destination: input.destination,
-      }).select().single();
+      const { data, error } = await supabase.functions.invoke('process-payout', {
+        body: input,
+      });
       if (error) throw error;
-      return data;
+      if (data?.error) throw new Error(data.error);
+      return data.payout;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['payouts'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payouts'] });
+      qc.invalidateQueries({ queryKey: ['wallet'] });
+    },
   });
 }
 
