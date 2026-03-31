@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 Deno.serve(async (req) => {
@@ -18,6 +18,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      console.error("Missing env vars");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -26,11 +38,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) {
@@ -43,19 +53,15 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { name, email, iban } = body;
 
-    if (!name || !email || !iban) {
-      return new Response(JSON.stringify({ error: "name, email, and iban are required" }), {
+    if (!name || !email) {
+      return new Response(JSON.stringify({ error: "name and email are required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Get business information
     const { data: business } = await adminClient
       .from("businesses")
       .select("id, gocardless_access_token")
@@ -63,7 +69,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (!business) {
-      return new Response(JSON.stringify({ error: "Business not found" }), {
+      return new Response(JSON.stringify({ error: "Business not found. Please complete your account setup first." }), {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -71,10 +77,10 @@ Deno.serve(async (req) => {
 
     let gocardlessCustomerId = null;
 
-    // If connected to GoCardless, create customer in GoCardless
     if (business.gocardless_access_token) {
       try {
-        const customerResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/customers`, {
+        const gcApiUrl = Deno.env.get("GOCARDLESS_API_URL") || "https://api-sandbox.gocardless.com";
+        const customerResponse = await fetch(`${gcApiUrl}/customers`, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${business.gocardless_access_token}`,
@@ -83,7 +89,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             customers: {
-              email: email,
+              email,
               given_name: name.split(' ')[0],
               family_name: name.split(' ').slice(1).join(' ') || name.split(' ')[0],
             },
@@ -94,38 +100,39 @@ Deno.serve(async (req) => {
           const customerData = await customerResponse.json();
           gocardlessCustomerId = customerData.customers.id;
         } else {
-          console.warn("Failed to create customer in GoCardless, continuing with local creation");
+          const errText = await customerResponse.text();
+          console.warn("GoCardless customer creation failed:", errText);
         }
       } catch (gcError) {
         console.warn("GoCardless customer creation failed:", gcError);
       }
     }
 
-    // Create customer in our database
     const { data: customer, error: customerError } = await adminClient
       .from("customers")
       .insert({
         business_id: business.id,
-        name: name,
-        email: email,
-        iban: iban,
+        name,
+        email,
+        iban: iban || '',
         gocardless_id: gocardlessCustomerId,
       })
       .select()
       .single();
 
     if (customerError) {
+      console.error("DB insert error:", customerError);
       return new Response(JSON.stringify({ error: customerError.message }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify(customer), {
+    return new Response(JSON.stringify({ success: true, customer }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("Create customer function error:", error);
+    console.error("Create customer error:", error);
     return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
