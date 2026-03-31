@@ -15,6 +15,7 @@ import WalletPage from "@/pages/WalletPage";
 import BankAccountsPage from "@/pages/BankAccounts";
 import PayoutsPage from "@/pages/Payouts";
 import NotFound from "./pages/NotFound";
+import OAuthCallback from "./pages/OAuthCallback";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/customers" element={<CustomersPage />} />

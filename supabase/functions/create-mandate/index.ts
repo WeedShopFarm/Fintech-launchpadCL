@@ -80,32 +80,72 @@ Deno.serve(async (req) => {
     let approvalUrl = "https://pay.gocardless.com/obp/mock-redirect";
 
     if (business.gocardless_access_token) {
-      // Call GoCardless API to create mandate
-      // For demo, mock the call
-      // In production, create customer bank account first, then mandate
-      const mandateResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/mandates`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${business.gocardless_access_token}`,
-          "Content-Type": "application/json",
-          "GoCardless-Version": "2015-07-06",
-        },
-        body: JSON.stringify({
-          mandates: {
-            scheme: "sepa_core",
-            // creditor: "CR123", // Need to set up creditor
-            // customer_bank_account: customerBankAccountId,
-            // For demo, mock
-          },
-        }),
-      });
+      try {
+        // First, get or create customer bank account in GoCardless
+        let customerBankAccountId = null;
 
-      if (mandateResponse.ok) {
-        const mandateData = await mandateResponse.json();
-        gocardlessId = mandateData.mandates.id;
-        // approvalUrl = mandateData.mandates.links?.customer_approval?.href || approvalUrl;
-      } else {
-        console.error("GoCardless mandate creation failed, using mock");
+        // Check if customer has a GoCardless ID
+        const { data: customerData } = await adminClient
+          .from("customers")
+          .select("gocardless_id, iban")
+          .eq("id", customer_id)
+          .single();
+
+        if (customerData?.gocardless_id && customerData?.iban) {
+          // Create customer bank account in GoCardless
+          const bankAccountResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/customer_bank_accounts`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${business.gocardless_access_token}`,
+              "Content-Type": "application/json",
+              "GoCardless-Version": "2015-07-06",
+            },
+            body: JSON.stringify({
+              customer_bank_accounts: {
+                account_holder_name: customerData.name || "Customer",
+                account_number: customerData.iban.replace(/\s/g, '').slice(-10), // Last 10 digits for demo
+                branch_code: "200000", // Demo sort code
+                country_code: "GB",
+                currency: "EUR",
+                iban: customerData.iban,
+                customer: customerData.gocardless_id,
+              },
+            }),
+          });
+
+          if (bankAccountResponse.ok) {
+            const bankAccountData = await bankAccountResponse.json();
+            customerBankAccountId = bankAccountData.customer_bank_accounts.id;
+          }
+        }
+
+        if (customerBankAccountId) {
+          // Create mandate in GoCardless
+          const mandateResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/mandates`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${business.gocardless_access_token}`,
+              "Content-Type": "application/json",
+              "GoCardless-Version": "2015-07-06",
+            },
+            body: JSON.stringify({
+              mandates: {
+                scheme: "sepa_core",
+                customer_bank_account: customerBankAccountId,
+              },
+            }),
+          });
+
+          if (mandateResponse.ok) {
+            const mandateData = await mandateResponse.json();
+            gocardlessId = mandateData.mandates.id;
+            approvalUrl = mandateData.mandates.links?.customer_approval?.href || approvalUrl;
+          } else {
+            console.error("GoCardless mandate creation failed, using mock");
+          }
+        }
+      } catch (gcError) {
+        console.error("GoCardless integration error:", gcError);
       }
     }
 

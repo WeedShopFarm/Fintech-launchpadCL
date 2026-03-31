@@ -9,7 +9,7 @@ export function useBusiness() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('businesses')
-        .select('id, name, country, owner_id, stripe_account_id, created_at, updated_at')
+        .select('id, name, country, owner_id, stripe_account_id, gocardless_access_token, created_at, updated_at')
         .eq('owner_id', user!.id)
         .maybeSingle();
       if (error) throw error;
@@ -38,18 +38,12 @@ export function useBankAccounts() {
 
 export function useAddBankAccount() {
   const qc = useQueryClient();
-  const { data: business } = useBusiness();
   return useMutation({
     mutationFn: async (input: { iban: string; bank_name: string; is_primary?: boolean }) => {
-      if (!business) {
-        throw new Error('Business not found. Please contact support.');
-      }
-      const { data, error } = await supabase.from('bank_accounts').insert({
-        business_id: business.id,
-        iban: input.iban,
-        bank_name: input.bank_name,
-        is_primary: input.is_primary ?? false,
-      }).select().single();
+      const { data, error } = await supabase.functions.invoke('create-bank-account', {
+        body: input,
+      });
+
       if (error) throw error;
       return data;
     },
@@ -87,16 +81,12 @@ export function useCustomers() {
 
 export function useAddCustomer() {
   const qc = useQueryClient();
-  const { data: business } = useBusiness();
   return useMutation({
     mutationFn: async (input: { name: string; email: string; iban: string }) => {
-      if (!business) {
-        throw new Error('Business not found. Please contact support.');
-      }
-      const { data, error } = await supabase.from('customers').insert({
-        business_id: business.id,
-        ...input,
-      }).select().single();
+      const { data, error } = await supabase.functions.invoke('create-customer', {
+        body: input,
+      });
+
       if (error) throw error;
       return data;
     },
@@ -134,18 +124,12 @@ export function useMandates() {
 
 export function useCreateMandate() {
   const qc = useQueryClient();
-  const { data: business } = useBusiness();
   return useMutation({
     mutationFn: async (input: { customer_id: string }) => {
-      if (!business) {
-        throw new Error('Business not found. Please contact support.');
-      }
-      const { data, error } = await supabase.from('mandates').insert({
-        business_id: business.id,
-        customer_id: input.customer_id,
-        status: 'pending',
-        gocardless_id: `MD_MOCK_${Date.now()}`,
-      }).select().single();
+      const { data, error } = await supabase.functions.invoke('create-mandate', {
+        body: { customer_id: input.customer_id },
+      });
+
       if (error) throw error;
       return data;
     },

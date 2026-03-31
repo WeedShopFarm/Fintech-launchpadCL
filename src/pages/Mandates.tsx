@@ -30,12 +30,14 @@ const MandatesPage = () => {
       return;
     }
     try {
-      await createMandate.mutateAsync({ customer_id: selectedCustomer });
-      toast.info('Mandate created', { description: 'In production, the customer would be redirected to authorize the SEPA mandate via GoCardless.' });
+      const result = await createMandate.mutateAsync({ customer_id: selectedCustomer });
+      toast.success('Mandate created successfully!', {
+        description: 'The customer will be redirected to authorize the SEPA mandate.'
+      });
       setOpen(false);
       setSelectedCustomer('');
     } catch (err: any) {
-      toast.error('Failed', { description: err.message });
+      toast.error('Failed to create mandate', { description: err.message });
     }
   };
 

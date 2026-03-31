@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion';
-import { Wallet, TrendingUp, Users, FileText, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react';
-import { useWallet, useCustomers, useMandates, useLedgerEntries } from '@/hooks/useBusinessData';
+import { Wallet, TrendingUp, Users, FileText, ArrowUpRight, ArrowDownRight, Loader2, Link, CheckCircle } from 'lucide-react';
+import { useWallet, useCustomers, useMandates, useLedgerEntries, useBusiness } from '@/hooks/useBusinessData';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 const StatCard = ({ label, value, icon: Icon, trend, trendUp }: { label: string; value: string; icon: any; trend?: string; trendUp?: boolean }) => (
   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-xl p-4 md:p-5">
@@ -26,6 +28,17 @@ const Dashboard = () => {
   const { data: customers } = useCustomers();
   const { data: mandates } = useMandates();
   const { data: ledger, isLoading: lLoading } = useLedgerEntries();
+  const { data: business } = useBusiness();
+
+  const handleConnectGoCardless = () => {
+    const clientId = import.meta.env.VITE_GOCARDLESS_CLIENT_ID;
+    const redirectUri = import.meta.env.VITE_GOCARDLESS_REDIRECT_URI;
+    const scope = 'read_write';
+
+    const authUrl = `https://connect-sandbox.gocardless.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
+
+    window.location.href = authUrl;
+  };
 
   const recentLedger = (ledger ?? []).slice(0, 5);
 
@@ -57,6 +70,35 @@ const Dashboard = () => {
         <StatCard label="Customers" value={(customers?.length ?? 0).toString()} icon={Users} />
         <StatCard label="Active Mandates" value={(mandates?.filter((m: any) => m.status === 'active').length ?? 0).toString()} icon={FileText} />
       </div>
+
+      {/* GoCardless Connection Status */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-xl p-4 md:p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {business?.gocardless_access_token ? (
+              <CheckCircle className="w-5 h-5 text-success" />
+            ) : (
+              <Link className="w-5 h-5 text-muted-foreground" />
+            )}
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                {business?.gocardless_access_token ? 'GoCardless Connected' : 'Connect GoCardless'}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {business?.gocardless_access_token
+                  ? 'Your account is connected to GoCardless for payment processing'
+                  : 'Connect your GoCardless account to start processing payments'
+                }
+              </p>
+            </div>
+          </div>
+          {!business?.gocardless_access_token && (
+            <Button onClick={handleConnectGoCardless} size="sm">
+              Connect
+            </Button>
+          )}
+        </div>
+      </motion.div>
 
       {chartData.length > 0 && (
         <div className="glass-card rounded-xl p-4 md:p-5">
