@@ -1,0 +1,1 @@
+CREATE POLICY "No inserts on ledger entries" ON ledger_entries FOR INSERT TO authenticated WITH CHECK (false);
