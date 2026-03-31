@@ -69,6 +69,13 @@ Deno.serve(async (req) => {
       .eq("id", customer.business_id)
       .single();
 
+    if (!business) {
+      return new Response(JSON.stringify({ error: "Business not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let gocardlessId = `MD_${Date.now()}`;
     let approvalUrl = "https://pay.gocardless.com/obp/mock-redirect";
 
