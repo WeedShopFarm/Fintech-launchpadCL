@@ -27,12 +27,12 @@ export function useBankAccounts() {
       const { data, error } = await supabase
         .from('bank_accounts')
         .select('*')
-        .eq('business_id', business.id)
+        .eq('business_id', business!.id)
         .order('is_primary', { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!business,
+    enabled: !!business?.id,
   });
 }
 
@@ -43,8 +43,8 @@ export function useAddBankAccount() {
       const { data, error } = await supabase.functions.invoke('create-bank-account', {
         body: input,
       });
-
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Failed to send request');
+      if (data?.error) throw new Error(data.error);
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bank_accounts'] }),
@@ -70,12 +70,12 @@ export function useCustomers() {
       const { data, error } = await supabase
         .from('customers')
         .select('*')
-        .eq('business_id', business.id)
+        .eq('business_id', business!.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!business,
+    enabled: !!business?.id,
   });
 }
 
@@ -86,8 +86,8 @@ export function useAddCustomer() {
       const { data, error } = await supabase.functions.invoke('create-customer', {
         body: input,
       });
-
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Failed to send request');
+      if (data?.error) throw new Error(data.error);
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['customers'] }),
@@ -113,24 +113,24 @@ export function useMandates() {
       const { data, error } = await supabase
         .from('mandates')
         .select('*, customers(name, email)')
-        .eq('business_id', business.id)
+        .eq('business_id', business!.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!business,
+    enabled: !!business?.id,
   });
 }
 
 export function useCreateMandate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { customer_id: string }) => {
+    mutationFn: async (input: { customer_id: string; scheme?: string }) => {
       const { data, error } = await supabase.functions.invoke('create-mandate', {
-        body: { customer_id: input.customer_id },
+        body: input,
       });
-
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Failed to send request');
+      if (data?.error) throw new Error(data.error);
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mandates'] }),
@@ -156,12 +156,30 @@ export function usePayments() {
       const { data, error } = await supabase
         .from('payments')
         .select('*, payment_plans(customer_id, customers(name))')
-        .eq('business_id', business.id)
+        .eq('business_id', business!.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!business,
+    enabled: !!business?.id,
+  });
+}
+
+export function useCreatePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { customer_id: string; amount: number; scheme?: string; mandate_id?: string }) => {
+      const { data, error } = await supabase.functions.invoke('create-payment', {
+        body: input,
+      });
+      if (error) throw new Error(error.message || 'Failed to send request');
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payments'] });
+      qc.invalidateQueries({ queryKey: ['payment_plans'] });
+    },
   });
 }
 
@@ -173,12 +191,12 @@ export function usePaymentPlans() {
       const { data, error } = await supabase
         .from('payment_plans')
         .select('*, customers(name)')
-        .eq('business_id', business.id)
+        .eq('business_id', business!.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!business,
+    enabled: !!business?.id,
   });
 }
 
@@ -212,7 +230,7 @@ export function useLedgerEntries() {
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!wallet,
+    enabled: !!wallet?.id,
   });
 }
 
@@ -240,13 +258,14 @@ export function useCreatePayout() {
       const { data, error } = await supabase.functions.invoke('process-payout', {
         body: input,
       });
-      if (error) throw error;
+      if (error) throw new Error(error.message || 'Failed to send request');
       if (data?.error) throw new Error(data.error);
       return data.payout;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payouts'] });
       qc.invalidateQueries({ queryKey: ['wallet'] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
     },
   });
 }

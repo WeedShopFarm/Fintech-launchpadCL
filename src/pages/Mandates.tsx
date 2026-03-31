@@ -23,6 +23,7 @@ const MandatesPage = () => {
   const deleteMandate = useDeleteMandate();
   const [open, setOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [scheme, setScheme] = useState('sepa_core');
 
   const handleCreate = async () => {
     if (!selectedCustomer) {
@@ -30,12 +31,15 @@ const MandatesPage = () => {
       return;
     }
     try {
-      const result = await createMandate.mutateAsync({ customer_id: selectedCustomer });
+      const result = await createMandate.mutateAsync({ customer_id: selectedCustomer, scheme });
       toast.success('Mandate created successfully!', {
-        description: 'The customer will be redirected to authorize the SEPA mandate.'
+        description: result?.approval_url
+          ? 'The customer will be redirected to authorize the mandate.'
+          : 'Mandate has been recorded.',
       });
       setOpen(false);
       setSelectedCustomer('');
+      setScheme('sepa_core');
     } catch (err: any) {
       toast.error('Failed to create mandate', { description: err.message });
     }
@@ -57,14 +61,14 @@ const MandatesPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Mandates</h1>
-          <p className="text-sm text-muted-foreground mt-1">SEPA Direct Debit mandates</p>
+          <p className="text-sm text-muted-foreground mt-1">SEPA & ACH Direct Debit mandates</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="w-4 h-4 mr-2" />Create Mandate</Button>
           </DialogTrigger>
           <DialogContent className="glass-card border-border">
-            <DialogHeader><DialogTitle>Create SEPA Mandate</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Create Direct Debit Mandate</DialogTitle></DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Customer</Label>
@@ -77,9 +81,22 @@ const MandatesPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <p className="text-xs text-muted-foreground">
-                In production, this will redirect the customer to GoCardless to authorize the SEPA mandate.
-              </p>
+              <div className="space-y-2">
+                <Label>Scheme</Label>
+                <Select value={scheme} onValueChange={setScheme}>
+                  <SelectTrigger className="bg-muted border-border"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sepa_core">SEPA Core (EUR)</SelectItem>
+                    <SelectItem value="ach">ACH Transfer (USD)</SelectItem>
+                    <SelectItem value="bacs">BACS (GBP)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {scheme === 'sepa_core' && 'SEPA direct debit for EUR collections across Europe.'}
+                  {scheme === 'ach' && 'ACH direct debit for USD collections in the United States.'}
+                  {scheme === 'bacs' && 'BACS direct debit for GBP collections in the UK.'}
+                </p>
+              </div>
               <Button className="w-full" onClick={handleCreate} disabled={createMandate.isPending}>
                 {createMandate.isPending ? 'Creating...' : 'Create Mandate'}
               </Button>

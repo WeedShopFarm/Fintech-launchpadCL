@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 Deno.serve(async (req) => {
@@ -18,6 +18,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      console.error("Missing env vars");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -26,11 +38,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) {
@@ -50,11 +60,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get business information
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: business, error: businessError } = await adminClient
       .from("businesses")
@@ -69,16 +75,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Exchange authorization code for access token
     const tokenResponse = await fetch("https://api-sandbox.gocardless.com/oauth/access_token", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         client_id: Deno.env.get("GOCARDLESS_CLIENT_ID"),
         client_secret: Deno.env.get("GOCARDLESS_CLIENT_SECRET"),
-        code: code,
+        code,
         grant_type: "authorization_code",
         redirect_uri: Deno.env.get("GOCARDLESS_REDIRECT_URI"),
       }),
@@ -95,7 +98,6 @@ Deno.serve(async (req) => {
 
     const tokenData = await tokenResponse.json();
 
-    // Store the access token in the business record
     const { error: updateError } = await adminClient
       .from("businesses")
       .update({
@@ -112,10 +114,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({
-      success: true,
-      message: "GoCardless connected successfully"
-    }), {
+    return new Response(JSON.stringify({ success: true, message: "GoCardless connected successfully" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {

@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 Deno.serve(async (req) => {
@@ -11,6 +11,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      console.error("Missing env vars");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -19,11 +31,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) {
@@ -33,9 +43,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const userId = user.id;
     const body = await req.json();
-    const { customer_id } = body;
+    const { customer_id, scheme } = body;
 
     if (!customer_id) {
       return new Response(JSON.stringify({ error: "customer_id required" }), {
@@ -44,14 +53,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
     const { data: customer } = await adminClient
       .from("customers")
-      .select("business_id")
+      .select("business_id, name, email, iban, gocardless_id")
       .eq("id", customer_id)
       .single();
 
@@ -62,7 +68,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get business and access token
     const { data: business } = await adminClient
       .from("businesses")
       .select("id, gocardless_access_token")
@@ -76,24 +81,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    let gocardlessId = `MD_${Date.now()}`;
-    let approvalUrl = "https://pay.gocardless.com/obp/mock-redirect";
+    const mandateScheme = scheme || "sepa_core";
+    let gocardlessId: string | null = null;
+    let approvalUrl: string | null = null;
 
     if (business.gocardless_access_token) {
+      const gcApiUrl = Deno.env.get("GOCARDLESS_API_URL") || "https://api-sandbox.gocardless.com";
       try {
-        // First, get or create customer bank account in GoCardless
-        let customerBankAccountId = null;
+        let customerBankAccountId: string | null = null;
 
-        // Check if customer has a GoCardless ID
-        const { data: customerData } = await adminClient
-          .from("customers")
-          .select("gocardless_id, iban")
-          .eq("id", customer_id)
-          .single();
-
-        if (customerData?.gocardless_id && customerData?.iban) {
-          // Create customer bank account in GoCardless
-          const bankAccountResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/customer_bank_accounts`, {
+        if (customer.gocardless_id && customer.iban) {
+          const bankAccountResponse = await fetch(`${gcApiUrl}/customer_bank_accounts`, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${business.gocardless_access_token}`,
@@ -102,13 +100,11 @@ Deno.serve(async (req) => {
             },
             body: JSON.stringify({
               customer_bank_accounts: {
-                account_holder_name: customerData.name || "Customer",
-                account_number: customerData.iban.replace(/\s/g, '').slice(-10), // Last 10 digits for demo
-                branch_code: "200000", // Demo sort code
-                country_code: "GB",
-                currency: "EUR",
-                iban: customerData.iban,
-                customer: customerData.gocardless_id,
+                account_holder_name: customer.name,
+                iban: customer.iban.replace(/\s/g, ''),
+                country_code: customer.iban.trim().substring(0, 2).toUpperCase(),
+                currency: mandateScheme === "ach" ? "USD" : "EUR",
+                links: { customer: customer.gocardless_id },
               },
             }),
           });
@@ -116,12 +112,14 @@ Deno.serve(async (req) => {
           if (bankAccountResponse.ok) {
             const bankAccountData = await bankAccountResponse.json();
             customerBankAccountId = bankAccountData.customer_bank_accounts.id;
+          } else {
+            const errText = await bankAccountResponse.text();
+            console.warn("GoCardless bank account creation failed:", errText);
           }
         }
 
         if (customerBankAccountId) {
-          // Create mandate in GoCardless
-          const mandateResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/mandates`, {
+          const mandateResponse = await fetch(`${gcApiUrl}/mandates`, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${business.gocardless_access_token}`,
@@ -130,8 +128,8 @@ Deno.serve(async (req) => {
             },
             body: JSON.stringify({
               mandates: {
-                scheme: "sepa_core",
-                customer_bank_account: customerBankAccountId,
+                scheme: mandateScheme,
+                links: { customer_bank_account: customerBankAccountId },
               },
             }),
           });
@@ -139,9 +137,10 @@ Deno.serve(async (req) => {
           if (mandateResponse.ok) {
             const mandateData = await mandateResponse.json();
             gocardlessId = mandateData.mandates.id;
-            approvalUrl = mandateData.mandates.links?.customer_approval?.href || approvalUrl;
+            approvalUrl = mandateData.mandates.links?.customer_approval?.href || null;
           } else {
-            console.error("GoCardless mandate creation failed, using mock");
+            const errText = await mandateResponse.text();
+            console.warn("GoCardless mandate creation failed:", errText);
           }
         }
       } catch (gcError) {
@@ -149,7 +148,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Create mandate record
     const { data: mandate, error } = await adminClient.from("mandates").insert({
       customer_id,
       business_id: customer.business_id,
@@ -157,18 +155,24 @@ Deno.serve(async (req) => {
       gocardless_id: gocardlessId,
     }).select().single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("DB insert error:", error);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     return new Response(JSON.stringify({
       success: true,
       mandate,
-      approval_url: approvalUrl
+      approval_url: approvalUrl,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Mandate creation error:", error);
-    return new Response(JSON.stringify({ error: "Internal error" }), {
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
