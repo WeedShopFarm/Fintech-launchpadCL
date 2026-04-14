@@ -1,0 +1,13 @@
+{
+  "collection": {
+    "root": "src",
+    "entryFile": "main",
+    "language": "ts"
+  },
+  "compilerOptions": {
+    "assets": [
+      "**/*.hbs"
+    ],
+    "watchAssets": true
+  }
+}
