@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { ArrowUpRight, Bitcoin, Building2, CreditCard, Plus, Loader2, Trash2 } from 'lucide-react';
+import { ArrowUpRight, Bitcoin, Building2, CreditCard, Banknote, Plus, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -17,7 +17,7 @@ const statusColors: Record<string, string> = {
   failed: 'bg-destructive/10 text-destructive border-destructive/20',
 };
 
-const methodIcons: Record<string, any> = { crypto: Bitcoin, iban: Building2, stripe: CreditCard };
+const methodIcons: Record<string, any> = { crypto: Bitcoin, iban: Building2, ach: Banknote, stripe: CreditCard };
 
 const PayoutsPage = () => {
   const { data: payouts, isLoading } = usePayouts();
@@ -28,22 +28,39 @@ const PayoutsPage = () => {
   const [method, setMethod] = useState('crypto');
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
+  const [achAccount, setAchAccount] = useState('');
+  const [achRouting, setAchRouting] = useState('');
+  const [achName, setAchName] = useState('');
   const [open, setOpen] = useState(false);
 
   const handlePayout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || !destination) {
+
+    let dest = destination;
+    if (method === 'ach') {
+      if (!achAccount || !achRouting || !achName) {
+        toast.error('Fill all ACH fields');
+        return;
+      }
+      dest = `${achAccount}|${achRouting}|${achName}`;
+    }
+
+    if (!amount || !dest) {
       toast.error('Fill all fields');
       return;
     }
+
     try {
-      await createPayout.mutateAsync({ amount: parseFloat(amount), method, destination });
+      await createPayout.mutateAsync({ amount: parseFloat(amount), method, destination: dest });
       toast.success('Payout request submitted');
       setOpen(false);
       setAmount('');
       setDestination('');
+      setAchAccount('');
+      setAchRouting('');
+      setAchName('');
     } catch (err: any) {
-      toast.error('Failed', { description: err.message });
+      toast.error('Payout failed', { description: err.message });
     }
   };
 
@@ -54,13 +71,13 @@ const PayoutsPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Payouts</h1>
-          <p className="text-sm text-muted-foreground mt-1">Withdraw to crypto, IBAN, or Stripe</p>
+          <p className="text-sm text-muted-foreground mt-1">Withdraw to crypto, IBAN, ACH, or Stripe</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="w-4 h-4 mr-2" />New Payout</Button>
           </DialogTrigger>
-          <DialogContent className="glass-card border-border">
+          <DialogContent className="glass-card border-border max-h-[85vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Request Payout</DialogTitle></DialogHeader>
             <form className="space-y-4" onSubmit={handlePayout}>
               <div className="glass-card rounded-lg p-3 bg-muted/50">
@@ -68,12 +85,12 @@ const PayoutsPage = () => {
                 <p className="text-lg font-bold font-mono text-success">€{Number(wallet?.available_balance ?? 0).toLocaleString()}</p>
               </div>
               <div className="space-y-2">
-                <Label>Amount (EUR)</Label>
-                <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000" required className="bg-muted border-border font-mono" />
+                <Label>Amount ({method === 'ach' ? 'USD' : 'EUR'})</Label>
+                <Input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000" required className="bg-muted border-border font-mono" />
               </div>
               <div className="space-y-2">
                 <Label>Payout Method</Label>
-                <Select value={method} onValueChange={v => { setMethod(v); setDestination(''); }}>
+                <Select value={method} onValueChange={v => { setMethod(v); setDestination(''); setAchAccount(''); setAchRouting(''); setAchName(''); }}>
                   <SelectTrigger className="bg-muted border-border"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="crypto">
@@ -82,12 +99,19 @@ const PayoutsPage = () => {
                         <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px] ml-1">Recommended</Badge>
                       </span>
                     </SelectItem>
-                    <SelectItem value="iban">External IBAN</SelectItem>
-                    <SelectItem value="ach">ACH Transfer</SelectItem>
-                    <SelectItem value="stripe">Stripe Connect</SelectItem>
+                    <SelectItem value="iban">
+                      <span className="flex items-center gap-2"><Building2 className="w-3 h-3" /> External IBAN (SEPA)</span>
+                    </SelectItem>
+                    <SelectItem value="ach">
+                      <span className="flex items-center gap-2"><Banknote className="w-3 h-3" /> ACH Transfer (USD)</span>
+                    </SelectItem>
+                    <SelectItem value="stripe">
+                      <span className="flex items-center gap-2"><CreditCard className="w-3 h-3" /> Stripe Connect</span>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
               {method === 'crypto' && (
                 <div className="space-y-2">
                   <Label>Destination Wallet</Label>
@@ -105,6 +129,7 @@ const PayoutsPage = () => {
                   )}
                 </div>
               )}
+
               {method === 'iban' && (
                 <div className="space-y-2">
                   <Label>Destination IBAN</Label>
@@ -122,18 +147,33 @@ const PayoutsPage = () => {
                   )}
                 </div>
               )}
+
               {method === 'ach' && (
-                <div className="space-y-2">
-                  <Label>ACH Details (account_number|routing_number|beneficiary_name)</Label>
-                  <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="123456789|021000021|John Doe" className="bg-muted border-border font-mono text-sm" />
+                <div className="space-y-3 p-3 rounded-lg border border-border bg-muted/30">
+                  <p className="text-xs font-semibold text-foreground">ACH Transfer Details</p>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Account Number</Label>
+                    <Input value={achAccount} onChange={e => setAchAccount(e.target.value)} placeholder="123456789" required className="bg-muted border-border font-mono text-sm" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Routing Number (ABA)</Label>
+                    <Input value={achRouting} onChange={e => setAchRouting(e.target.value)} placeholder="021000021" required className="bg-muted border-border font-mono text-sm" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Beneficiary Name</Label>
+                    <Input value={achName} onChange={e => setAchName(e.target.value)} placeholder="John Doe" required className="bg-muted border-border text-sm" />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">ACH payouts settle in USD to US bank accounts via the Automated Clearing House network.</p>
                 </div>
               )}
+
               {method === 'stripe' && (
                 <div className="space-y-2">
                   <Label>Stripe Account ID</Label>
                   <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="acct_123..." className="bg-muted border-border font-mono text-sm" />
                 </div>
               )}
+
               <Button className="w-full" disabled={createPayout.isPending}>
                 {createPayout.isPending ? 'Submitting...' : 'Submit Payout Request'}
               </Button>
@@ -155,7 +195,10 @@ const PayoutsPage = () => {
                     <Icon className="w-4 h-4 text-muted-foreground" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-foreground">€{Number(payout.amount).toLocaleString()}</p>
+                    <p className="text-sm font-medium text-foreground">
+                      {payout.currency === 'USD' ? '$' : '€'}{Number(payout.amount).toLocaleString()}
+                      <span className="text-xs text-muted-foreground ml-2">{payout.method.toUpperCase()}</span>
+                    </p>
                     <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]">{payout.destination}</p>
                     <p className="text-xs text-muted-foreground">{new Date(payout.created_at).toLocaleDateString()}</p>
                   </div>
