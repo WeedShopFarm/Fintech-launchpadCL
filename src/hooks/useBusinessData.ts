@@ -88,6 +88,7 @@ export function useAddCustomer() {
       iban?: string;
       us_account_number?: string;
       us_routing_number?: string;
+      use_stripe_us_bank?: boolean;
     }) => {
       const { data, error } = await supabase.functions.invoke('create-customer', {
         body: input,
@@ -180,7 +181,12 @@ export function useCreatePayment() {
       });
       if (error) throw new Error(error.message || 'Failed to send request');
       if (data?.error) throw new Error(data.error);
-      return data;
+      return data as {
+        success?: boolean;
+        payment?: unknown;
+        stripe_client_secret?: string;
+        details?: string;
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['payments'] });

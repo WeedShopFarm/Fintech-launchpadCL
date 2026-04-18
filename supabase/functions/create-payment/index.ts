@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Stripe from "https://esm.sh/stripe@14.25.0?target=deno";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
 
     const { data: customer } = await adminClient
       .from("customers")
-      .select("id, iban")
+      .select("id, iban, stripe_customer_id, stripe_us_bank_payment_method_id")
       .eq("id", customer_id)
       .eq("business_id", business.id)
       .single();
@@ -90,13 +91,102 @@ Deno.serve(async (req) => {
       });
     }
 
-    const currency = scheme === "ach" ? "USD" : "EUR";
+    const currency = scheme === "ach" || scheme === "ach_stripe" ? "USD" : "EUR";
     let gocardlessPaymentId: string | null = null;
     let status = "pending";
     let linkedMandateId: string | null = null;
 
     const gcApiBase =
       (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+
+    if (scheme === "ach_stripe") {
+      const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+      if (!stripeKey) {
+        return new Response(JSON.stringify({ error: "STRIPE_SECRET_KEY is not configured for Stripe ACH" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!customer.stripe_customer_id || !customer.stripe_us_bank_payment_method_id) {
+        return new Response(JSON.stringify({
+          error: "Customer must complete Stripe US bank linking (Financial Connections) before ACH Stripe payments.",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: paymentPlan, error: planErr } = await adminClient
+        .from("payment_plans")
+        .insert({
+          customer_id,
+          business_id: business.id,
+          amount,
+          currency,
+          status: "active",
+          mandate_id: null,
+        })
+        .select()
+        .single();
+
+      if (planErr || !paymentPlan) {
+        console.error("payment_plans insert error:", planErr);
+        return new Response(JSON.stringify({ error: planErr?.message ?? "Failed to create payment plan" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: payment, error: paymentErr } = await adminClient
+        .from("payments")
+        .insert({
+          plan_id: paymentPlan.id,
+          business_id: business.id,
+          amount,
+          currency,
+          status: "pending",
+          gocardless_payment_id: null,
+        })
+        .select()
+        .single();
+
+      if (paymentErr || !payment) throw paymentErr ?? new Error("payment insert failed");
+
+      const stripe = new Stripe(stripeKey, {
+        apiVersion: "2023-10-16",
+        httpClient: Stripe.createFetchHttpClient(),
+      });
+
+      const pi = await stripe.paymentIntents.create({
+        amount: Math.round(Number(amount) * 100),
+        currency: "usd",
+        customer: customer.stripe_customer_id,
+        payment_method: customer.stripe_us_bank_payment_method_id,
+        payment_method_types: ["us_bank_account"],
+        metadata: { supabase_payment_id: payment.id, customer_id: customer_id },
+        confirm: false,
+      });
+
+      const piStatus = pi.status === "requires_payment_method" ? "pending" : (pi.status ?? "pending");
+
+      await adminClient
+        .from("payments")
+        .update({
+          stripe_payment_intent_id: pi.id,
+          status: piStatus,
+        })
+        .eq("id", payment.id);
+
+      const merged = { ...payment, status: piStatus, stripe_payment_intent_id: pi.id };
+
+      return new Response(JSON.stringify({
+        success: true,
+        payment: merged,
+        stripe_client_secret: pi.client_secret,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (scheme === "ach") {
       if (!mandate_id) {

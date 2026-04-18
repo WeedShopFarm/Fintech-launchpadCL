@@ -1,4 +1,3 @@
--- Update GoCardless access token for sandbox
-UPDATE public.businesses
-SET gocardless_access_token = 'sandbox_gmDpWqCdix7foDRixM-tt18waksc6SGZAykQOwFn'
-WHERE gocardless_access_token IS NULL OR gocardless_access_token = '';
+-- Previously this migration wrote a sandbox token into the repository (removed).
+-- Configure `gocardless_access_token` per environment via Supabase secrets or the dashboard — never in SQL.
+SELECT 1;

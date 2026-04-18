@@ -124,6 +124,8 @@ export type Database = {
           iban: string
           id: string
           name: string
+          stripe_customer_id: string | null
+          stripe_us_bank_payment_method_id: string | null
           us_account_number: string | null
           us_routing_number: string | null
         }
@@ -135,6 +137,8 @@ export type Database = {
           iban?: string
           id?: string
           name: string
+          stripe_customer_id?: string | null
+          stripe_us_bank_payment_method_id?: string | null
           us_account_number?: string | null
           us_routing_number?: string | null
         }
@@ -146,6 +150,8 @@ export type Database = {
           iban?: string
           id?: string
           name?: string
+          stripe_customer_id?: string | null
+          stripe_us_bank_payment_method_id?: string | null
           us_account_number?: string | null
           us_routing_number?: string | null
         }
@@ -319,6 +325,7 @@ export type Database = {
           id: string
           plan_id: string | null
           status: string
+          stripe_payment_intent_id: string | null
         }
         Insert: {
           amount?: number
@@ -329,6 +336,7 @@ export type Database = {
           id?: string
           plan_id?: string | null
           status?: string
+          stripe_payment_intent_id?: string | null
         }
         Update: {
           amount?: number
@@ -339,6 +347,7 @@ export type Database = {
           id?: string
           plan_id?: string | null
           status?: string
+          stripe_payment_intent_id?: string | null
         }
         Relationships: [
           {
@@ -466,6 +475,7 @@ export type Database = {
         Row: {
           created_at: string
           event_type: string
+          external_id: string | null
           id: string
           payload: Json
           processed: boolean
@@ -474,6 +484,7 @@ export type Database = {
         Insert: {
           created_at?: string
           event_type: string
+          external_id?: string | null
           id?: string
           payload?: Json
           processed?: boolean
@@ -482,6 +493,7 @@ export type Database = {
         Update: {
           created_at?: string
           event_type?: string
+          external_id?: string | null
           id?: string
           payload?: Json
           processed?: boolean

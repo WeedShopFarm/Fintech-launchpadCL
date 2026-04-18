@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { usePayments, useCustomers, useMandates, useCreatePayment } from '@/hooks/useBusinessData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,14 +10,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import { StripePaymentConfirmDialog } from '@/components/stripe/StripeUsBankDialogs';
 
 const statusColors: Record<string, string> = {
   confirmed: 'bg-success/10 text-success border-success/20',
   pending: 'bg-warning/10 text-warning border-warning/20',
   failed: 'bg-destructive/10 text-destructive border-destructive/20',
+  processing: 'bg-primary/10 text-primary border-primary/20',
 };
 
 const PaymentsPage = () => {
+  const qc = useQueryClient();
   const { data: payments, isLoading } = usePayments();
   const { data: customers } = useCustomers();
   const { data: mandates } = useMandates();
@@ -26,6 +30,8 @@ const PaymentsPage = () => {
   const [mandateId, setMandateId] = useState('');
   const [amount, setAmount] = useState('');
   const [scheme, setScheme] = useState('sepa');
+  const [stripeSecret, setStripeSecret] = useState<string | null>(null);
+  const [stripeOpen, setStripeOpen] = useState(false);
 
   const customerMandates = (mandates ?? []).filter(
     (m: any) =>
@@ -33,6 +39,13 @@ const PaymentsPage = () => {
       m.gocardless_id &&
       !['cancelled', 'failed', 'expired'].includes(String(m.status)),
   );
+
+  const resetForm = () => {
+    setCustomerId('');
+    setMandateId('');
+    setAmount('');
+    setScheme('sepa');
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,19 +57,29 @@ const PaymentsPage = () => {
       toast.error('ACH requires a mandate', { description: 'Create an ACH mandate for this customer, then select it here.' });
       return;
     }
+    const cust = (customers ?? []).find((c: any) => c.id === customerId);
+    if (scheme === 'ach_stripe' && !cust?.stripe_us_bank_payment_method_id) {
+      toast.error('Stripe ACH requires a linked US bank account', { description: 'Use Customers → Link Stripe bank for this customer first.' });
+      return;
+    }
     try {
-      await createPayment.mutateAsync({
+      const result = await createPayment.mutateAsync({
         customer_id: customerId,
         amount: parseFloat(amount),
         scheme,
         mandate_id: mandateId || undefined,
       });
-      toast.success('Payment created');
-      setOpen(false);
-      setCustomerId('');
-      setMandateId('');
-      setAmount('');
-      setScheme('sepa');
+      if (result.stripe_client_secret) {
+        setStripeSecret(result.stripe_client_secret);
+        setStripeOpen(true);
+        setOpen(false);
+        toast.message('Authorize the debit', { description: 'Complete the Stripe step to submit this ACH payment.' });
+        resetForm();
+      } else {
+        toast.success('Payment created');
+        setOpen(false);
+        resetForm();
+      }
     } catch (err: any) {
       toast.error('Failed to create payment', { description: err.message });
     }
@@ -66,10 +89,22 @@ const PaymentsPage = () => {
 
   return (
     <div className="space-y-6">
+      <StripePaymentConfirmDialog
+        open={stripeOpen}
+        onOpenChange={(v) => {
+          setStripeOpen(v);
+          if (!v) setStripeSecret(null);
+        }}
+        clientSecret={stripeSecret}
+        onDone={() => {
+          qc.invalidateQueries({ queryKey: ['payments'] });
+        }}
+      />
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Payments</h1>
-          <p className="text-sm text-muted-foreground mt-1">Track SEPA & ACH direct debit payments</p>
+          <p className="text-sm text-muted-foreground mt-1">SEPA, GoCardless ACH, or Stripe ACH (Financial Connections)</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -84,12 +119,15 @@ const PaymentsPage = () => {
                   <SelectTrigger className="bg-muted border-border"><SelectValue placeholder="Select customer" /></SelectTrigger>
                   <SelectContent>
                     {(customers ?? []).map((c: any) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name} – {c.email}</SelectItem>
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} – {c.email}
+                        {c.stripe_us_bank_payment_method_id ? ' · Stripe' : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              {customerId && (
+              {customerId && scheme !== 'ach_stripe' && (
                 <div className="space-y-2">
                   <Label>{scheme === 'ach' ? 'Mandate (required for ACH)' : 'Mandate (optional for SEPA)'}</Label>
                   {customerMandates.length === 0 ? (
@@ -114,15 +152,18 @@ const PaymentsPage = () => {
                   <SelectTrigger className="bg-muted border-border"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="sepa">SEPA (EUR)</SelectItem>
-                    <SelectItem value="ach">ACH Transfer (USD)</SelectItem>
+                    <SelectItem value="ach">ACH — GoCardless (USD)</SelectItem>
+                    <SelectItem value="ach_stripe">ACH — Stripe Financial Connections (USD)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {scheme === 'sepa' ? 'Collect EUR via SEPA Direct Debit' : 'Collect USD via ACH Direct Debit'}
+                  {scheme === 'sepa' && 'Collect EUR via SEPA Direct Debit.'}
+                  {scheme === 'ach' && 'Collect USD via GoCardless ACH using an active mandate.'}
+                  {scheme === 'ach_stripe' && 'Collect USD via Stripe using a customer who has completed “Link Stripe bank”.'}
                 </p>
               </div>
               <div className="space-y-2">
-                <Label>Amount ({scheme === 'ach' ? 'USD' : 'EUR'})</Label>
+                <Label>Amount ({scheme === 'sepa' ? 'EUR' : 'USD'})</Label>
                 <Input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="100.00" required className="bg-muted border-border font-mono" />
               </div>
               <Button className="w-full" disabled={createPayment.isPending}>

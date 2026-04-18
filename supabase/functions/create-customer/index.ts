@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { name, email, iban, us_account_number, us_routing_number } = body;
+    const { name, email, iban, us_account_number, us_routing_number, use_stripe_us_bank } = body;
 
     if (!name || !email) {
       return new Response(JSON.stringify({ error: "name and email are required" }), {
@@ -66,9 +66,10 @@ Deno.serve(async (req) => {
 
     const hasSepa = ibanClean.length > 0;
     const hasUsAch = usAcct.length > 0 && usRoute.length > 0;
-    if (!hasSepa && !hasUsAch) {
+    const stripeUsOnly = use_stripe_us_bank === true;
+    if (!hasSepa && !hasUsAch && !stripeUsOnly) {
       return new Response(JSON.stringify({
-        error: "Provide either an IBAN (SEPA) or both US account number and routing number (ACH).",
+        error: "Provide an IBAN (SEPA), US routing + account (GoCardless ACH), or choose Stripe US bank linking.",
       }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

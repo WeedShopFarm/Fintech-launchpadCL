@@ -2,69 +2,131 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, webhook-signature, webhooks-signature",
 };
+
+function mapMandateStatus(action: string | undefined): string | undefined {
+  const a = (action ?? "").toLowerCase().replace(/-/g, "_");
+  if (["active", "activated"].includes(a)) return "active";
+  if (["cancelled", "canceled"].includes(a)) return "cancelled";
+  if (a === "expired") return "expired";
+  if (a === "failed") return "failed";
+  if ([
+    "created",
+    "submitted",
+    "pending_customer_approval",
+    "pending_submission",
+    "customer_approval_granted",
+    "replaced",
+    "consumed",
+    "blocked",
+  ].includes(a)) return "pending";
+  return undefined;
+}
+
+function mapPaymentStatus(action: string | undefined): string | undefined {
+  const a = (action ?? "").toLowerCase().replace(/-/g, "_");
+  if (["confirmed", "paid_out", "chargeback_cancelled"].includes(a)) return "confirmed";
+  if (["failed", "cancelled", "canceled", "customer_approval_denied", "charged_back"].includes(a)) return "failed";
+  if (["pending_submission", "submitted", "pending_customer_approval"].includes(a)) return "pending";
+  if (["processing"].includes(a)) return "processing";
+  return undefined;
+}
+
+function mandateGcId(ev: Record<string, unknown>): string | undefined {
+  const links = ev.links as Record<string, string> | undefined;
+  if (links?.mandate) return links.mandate;
+  const rid = typeof ev.resource_id === "string" ? ev.resource_id : undefined;
+  if (ev.resource_type === "mandates" && rid?.startsWith("MD")) return rid;
+  return undefined;
+}
+
+function paymentGcId(ev: Record<string, unknown>): string | undefined {
+  const links = ev.links as Record<string, string> | undefined;
+  if (links?.payment) return links.payment;
+  const rid = typeof ev.resource_id === "string" ? ev.resource_id : undefined;
+  if (ev.resource_type === "payments" && rid?.startsWith("PM")) return rid;
+  return undefined;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) {
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    const body = await req.json();
-    const { events } = body;
+    const rawBody = await req.text();
+    const body = JSON.parse(rawBody) as { events?: Record<string, unknown>[] };
+    if (!Array.isArray(body.events) || body.events.length === 0) {
+      return new Response(JSON.stringify({ success: true, ignored: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const events = body.events;
 
-    for (const event of events ?? [body]) {
-      const eventType = event.action ?? event.event_type ?? "unknown";
-      const resourceType = event.resource_type ?? "unknown";
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+    for (const event of events) {
+      const resourceType = String(event.resource_type ?? "unknown");
+      const action = String(event.action ?? event.event_type ?? "unknown");
+      const externalId = typeof event.id === "string" ? event.id : undefined;
+
+      if (externalId) {
+        const { data: existing } = await supabase
+          .from("webhook_events")
+          .select("id")
+          .eq("source", "gocardless")
+          .eq("external_id", externalId)
+          .maybeSingle();
+        if (existing) continue;
+      }
 
       await supabase.from("webhook_events").insert({
         source: "gocardless",
-        event_type: `${resourceType}.${eventType}`,
+        event_type: `${resourceType}.${action}`,
         payload: event,
+        external_id: externalId ?? null,
+        processed: false,
       });
 
       if (resourceType === "mandates") {
-        if (eventType === "created" || eventType === "activated") {
-          const mandateId = event.links?.mandate;
-          if (mandateId) {
-            const newStatus = eventType === "activated" ? "active" : "pending";
-            await supabase
-              .from("mandates")
-              .update({ status: newStatus })
-              .eq("gocardless_id", mandateId);
-          }
-        } else if (eventType === "cancelled" || eventType === "expired") {
-          const mandateId = event.links?.mandate;
-          if (mandateId) {
-            await supabase
-              .from("mandates")
-              .update({ status: eventType })
-              .eq("gocardless_id", mandateId);
-          }
+        const mid = mandateGcId(event);
+        const next = mapMandateStatus(action);
+        if (mid && next) {
+          await supabase.from("mandates").update({ status: next }).eq("gocardless_id", mid);
         }
       }
 
       if (resourceType === "payments") {
-        const paymentGcId = event.links?.payment;
-        if (eventType === "confirmed" && paymentGcId) {
-          await supabase
-            .from("payments")
-            .update({ status: "confirmed" })
-            .eq("gocardless_payment_id", paymentGcId);
+        const pid = paymentGcId(event);
+        const next = mapPaymentStatus(action);
+        if (pid && next) {
+          await supabase.from("payments").update({ status: next }).eq("gocardless_payment_id", pid);
         }
+      }
 
-        if (eventType === "failed" && paymentGcId) {
-          await supabase
-            .from("payments")
-            .update({ status: "failed" })
-            .eq("gocardless_payment_id", paymentGcId);
-        }
+      if (externalId) {
+        await supabase
+          .from("webhook_events")
+          .update({ processed: true })
+          .eq("source", "gocardless")
+          .eq("external_id", externalId);
       }
     }
 
