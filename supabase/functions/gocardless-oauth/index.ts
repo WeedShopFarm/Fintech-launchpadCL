@@ -75,7 +75,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const tokenResponse = await fetch("https://api-sandbox.gocardless.com/oauth/access_token", {
+    const apiBase =
+      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+
+    const tokenResponse = await fetch(`${apiBase}/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

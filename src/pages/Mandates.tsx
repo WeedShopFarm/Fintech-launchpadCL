@@ -32,10 +32,13 @@ const MandatesPage = () => {
     }
     try {
       const result = await createMandate.mutateAsync({ customer_id: selectedCustomer, scheme });
+      if (result?.approval_url) {
+        window.open(result.approval_url as string, '_blank', 'noopener,noreferrer');
+      }
       toast.success('Mandate created successfully!', {
         description: result?.approval_url
-          ? 'The customer will be redirected to authorize the mandate.'
-          : 'Mandate has been recorded.',
+          ? 'Open the new tab to complete customer authorization (if the browser blocked it, check the popup).'
+          : 'Mandate has been recorded locally. Connect GoCardless and ensure the customer has IBAN + GoCardless sync for live mandates.',
       });
       setOpen(false);
       setSelectedCustomer('');
