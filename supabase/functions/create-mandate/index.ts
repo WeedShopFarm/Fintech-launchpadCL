@@ -91,6 +91,7 @@ Deno.serve(async (req) => {
         let customerBankAccountId: string | null = null;
 
         if (customer.gocardless_id && customer.iban) {
+          const ibanClean = customer.iban.replace(/\s/g, "");
           const bankAccountResponse = await fetch(`${gcApiUrl}/customer_bank_accounts`, {
             method: "POST",
             headers: {
@@ -101,8 +102,8 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               customer_bank_accounts: {
                 account_holder_name: customer.name,
-                iban: customer.iban.replace(/\s/g, ''),
-                country_code: customer.iban.trim().substring(0, 2).toUpperCase(),
+                iban: ibanClean,
+                country_code: ibanClean.slice(0, 2).toUpperCase(),
                 currency: mandateScheme === "ach" ? "USD" : "EUR",
                 links: { customer: customer.gocardless_id },
               },

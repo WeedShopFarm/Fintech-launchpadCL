@@ -80,6 +80,9 @@ Deno.serve(async (req) => {
     let gocardlessPaymentId = null;
     let status = "pending";
 
+    const gcApiBase =
+      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+
     if (business.gocardless_access_token) {
       // For ACH collections, create payment directly
       // For SEPA, would use mandate, but for demo, mock
@@ -89,7 +92,7 @@ Deno.serve(async (req) => {
         const accountNumber = customer.iban; // Mock
         const routingNumber = "021000021"; // Mock
 
-        const paymentResponse = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/payments`, {
+        const paymentResponse = await fetch(`${gcApiBase}/payments`, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${business.gocardless_access_token}`,

@@ -4,6 +4,7 @@ import { useWallet, useCustomers, useMandates, useLedgerEntries, useBusiness } f
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { buildGoCardlessAuthorizeUrl } from '@/lib/gocardless';
 
 const StatCard = ({ label, value, icon: Icon, trend, trendUp }: { label: string; value: string; icon: any; trend?: string; trendUp?: boolean }) => (
   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-xl p-4 md:p-5">
@@ -33,11 +34,17 @@ const Dashboard = () => {
   const handleConnectGoCardless = () => {
     const clientId = import.meta.env.VITE_GOCARDLESS_CLIENT_ID;
     const redirectUri = import.meta.env.VITE_GOCARDLESS_REDIRECT_URI;
-    const scope = 'read_write';
+    if (!clientId?.trim() || !redirectUri?.trim()) {
+      toast.error('GoCardless is not configured', {
+        description: 'Set VITE_GOCARDLESS_CLIENT_ID and VITE_GOCARDLESS_REDIRECT_URI (and optionally VITE_GOCARDLESS_ENV=live or VITE_GOCARDLESS_OAUTH_BASE).',
+      });
+      return;
+    }
 
-    const authUrl = `https://connect-sandbox.gocardless.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
-
-    window.location.href = authUrl;
+    window.location.href = buildGoCardlessAuthorizeUrl({
+      clientId: clientId.trim(),
+      redirectUri: redirectUri.trim(),
+    });
   };
 
   const recentLedger = (ledger ?? []).slice(0, 5);

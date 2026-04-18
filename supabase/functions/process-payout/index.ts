@@ -84,6 +84,9 @@ Deno.serve(async (req) => {
     let gocardlessPayoutId = null;
     let status = "processing";
 
+    const gcApiBase =
+      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+
     if (method === "ach") {
       if (!business.gocardless_access_token) {
         return new Response(JSON.stringify({ error: "GoCardless access token not configured" }), {
@@ -103,7 +106,7 @@ Deno.serve(async (req) => {
 
       const [accountNumber, routingNumber, beneficiaryName] = parts;
 
-    const payoutResponse: Response = await fetch(`${Deno.env.get("GOCARDLESS_API_URL")}/payouts`, {
+      const payoutResponse: Response = await fetch(`${gcApiBase}/payouts`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${business.gocardless_access_token}`,
