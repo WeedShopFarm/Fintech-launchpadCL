@@ -1,1 +1,8 @@
 project_id = "ueivvbehthfcbfdqngtc"
+
+# Provider webhooks call these endpoints without a Supabase user JWT.
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.gocardless-webhook]
+verify_jwt = false
