@@ -82,7 +82,13 @@ export function useCustomers() {
 export function useAddCustomer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { name: string; email: string; iban: string }) => {
+    mutationFn: async (input: {
+      name: string;
+      email: string;
+      iban?: string;
+      us_account_number?: string;
+      us_routing_number?: string;
+    }) => {
       const { data, error } = await supabase.functions.invoke('create-customer', {
         body: input,
       });

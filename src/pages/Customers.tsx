@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, Search, Loader2, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -16,7 +17,14 @@ const CustomersPage = () => {
   const deleteCustomer = useDeleteCustomer();
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', iban: '' });
+  const [accountKind, setAccountKind] = useState<'sepa' | 'us'>('sepa');
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    iban: '',
+    us_account_number: '',
+    us_routing_number: '',
+  });
 
   const filtered = (customers ?? []).filter((c: any) =>
     c.name.toLowerCase().includes(search.toLowerCase()) || c.email.toLowerCase().includes(search.toLowerCase())
@@ -25,10 +33,25 @@ const CustomersPage = () => {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await addCustomer.mutateAsync(form);
+      if (accountKind === 'sepa') {
+        await addCustomer.mutateAsync({
+          name: form.name,
+          email: form.email,
+          iban: form.iban,
+        });
+      } else {
+        await addCustomer.mutateAsync({
+          name: form.name,
+          email: form.email,
+          iban: '',
+          us_account_number: form.us_account_number,
+          us_routing_number: form.us_routing_number,
+        });
+      }
       toast.success('Customer created');
       setOpen(false);
-      setForm({ name: '', email: '', iban: '' });
+      setAccountKind('sepa');
+      setForm({ name: '', email: '', iban: '', us_account_number: '', us_routing_number: '' });
     } catch (err: any) {
       toast.error('Failed to create customer', { description: err.message });
     }
@@ -50,9 +73,9 @@ const CustomersPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Customers</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage your SEPA debit customers</p>
+          <p className="text-sm text-muted-foreground mt-1">SEPA (IBAN) and US ACH debit customers</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setAccountKind('sepa'); setForm({ name: '', email: '', iban: '', us_account_number: '', us_routing_number: '' }); } }}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="w-4 h-4 mr-2" />Add Customer</Button>
           </DialogTrigger>
@@ -61,7 +84,29 @@ const CustomersPage = () => {
             <form className="space-y-4" onSubmit={handleCreate}>
               <div className="space-y-2"><Label>Full Name</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Marie Dupont" required className="bg-muted border-border" /></div>
               <div className="space-y-2"><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="marie@example.com" required className="bg-muted border-border" /></div>
-              <div className="space-y-2"><Label>IBAN</Label><Input value={form.iban} onChange={e => setForm(f => ({ ...f, iban: e.target.value }))} placeholder="FR76 1234 5678 ..." className="bg-muted border-border font-mono text-sm" /></div>
+
+              <Tabs value={accountKind} onValueChange={(v) => setAccountKind(v as 'sepa' | 'us')}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="sepa">SEPA (IBAN)</TabsTrigger>
+                  <TabsTrigger value="us">US ACH</TabsTrigger>
+                </TabsList>
+                <TabsContent value="sepa" className="space-y-2 pt-2">
+                  <Label>IBAN</Label>
+                  <Input value={form.iban} onChange={e => setForm(f => ({ ...f, iban: e.target.value }))} placeholder="FR76 1234 5678 ..." required={accountKind === 'sepa'} className="bg-muted border-border font-mono text-sm" />
+                </TabsContent>
+                <TabsContent value="us" className="space-y-3 pt-2">
+                  <div className="space-y-2">
+                    <Label>Account number</Label>
+                    <Input value={form.us_account_number} onChange={e => setForm(f => ({ ...f, us_account_number: e.target.value }))} placeholder="Checking account number" required={accountKind === 'us'} className="bg-muted border-border font-mono text-sm" autoComplete="off" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Routing (ABA)</Label>
+                    <Input value={form.us_routing_number} onChange={e => setForm(f => ({ ...f, us_routing_number: e.target.value.replace(/\D/g, '').slice(0, 9) }))} placeholder="9-digit routing number" required={accountKind === 'us'} maxLength={9} className="bg-muted border-border font-mono text-sm" inputMode="numeric" autoComplete="off" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Used with GoCardless ACH mandates. Use sandbox test bank details from your GoCardless dashboard.</p>
+                </TabsContent>
+              </Tabs>
+
               <Button className="w-full" disabled={addCustomer.isPending}>
                 {addCustomer.isPending ? 'Creating...' : 'Create Customer'}
               </Button>
@@ -81,12 +126,16 @@ const CustomersPage = () => {
         <div className="space-y-2">
           {filtered.map((customer: any, i: number) => {
             const mandate = (mandates ?? []).find((m: any) => m.customer_id === customer.id);
+            const usHint = customer.us_routing_number
+              ? `US ACH ····${String(customer.us_account_number ?? '').slice(-4)}`
+              : null;
             return (
               <motion.div key={customer.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="glass-card rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">{customer.name}</p>
                   <p className="text-xs text-muted-foreground">{customer.email}</p>
                   {customer.iban && <p className="text-xs text-muted-foreground font-mono mt-1">{customer.iban}</p>}
+                  {usHint && <p className="text-xs text-muted-foreground font-mono mt-1">{usHint}</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   {mandate && (

@@ -1,0 +1,14 @@
+{
+  "name": "fintech-launchpad",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Vite", "onAutoForward": "notify" }
+  },
+  "postCreateCommand": "npm install && npx playwright install chromium",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "bradlc.vscode-tailwindcss"]
+    }
+  }
+}

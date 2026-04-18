@@ -120,25 +120,34 @@ export type Database = {
           business_id: string
           created_at: string
           email: string
+          gocardless_id: string | null
           iban: string
           id: string
           name: string
+          us_account_number: string | null
+          us_routing_number: string | null
         }
         Insert: {
           business_id: string
           created_at?: string
           email: string
+          gocardless_id?: string | null
           iban?: string
           id?: string
           name: string
+          us_account_number?: string | null
+          us_routing_number?: string | null
         }
         Update: {
           business_id?: string
           created_at?: string
           email?: string
+          gocardless_id?: string | null
           iban?: string
           id?: string
           name?: string
+          us_account_number?: string | null
+          us_routing_number?: string | null
         }
         Relationships: [
           {

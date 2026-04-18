@@ -51,10 +51,32 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { name, email, iban } = body;
+    const { name, email, iban, us_account_number, us_routing_number } = body;
 
     if (!name || !email) {
       return new Response(JSON.stringify({ error: "name and email are required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const ibanClean = typeof iban === "string" ? iban.replace(/\s/g, "") : "";
+    const usAcct = typeof us_account_number === "string" ? us_account_number.replace(/\s/g, "") : "";
+    const usRoute = typeof us_routing_number === "string" ? us_routing_number.replace(/\s/g, "") : "";
+
+    const hasSepa = ibanClean.length > 0;
+    const hasUsAch = usAcct.length > 0 && usRoute.length > 0;
+    if (!hasSepa && !hasUsAch) {
+      return new Response(JSON.stringify({
+        error: "Provide either an IBAN (SEPA) or both US account number and routing number (ACH).",
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (hasUsAch && !/^\d{9}$/.test(usRoute)) {
+      return new Response(JSON.stringify({ error: "US routing number must be exactly 9 digits" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -114,7 +136,9 @@ Deno.serve(async (req) => {
         business_id: business.id,
         name,
         email,
-        iban: iban || '',
+        iban: ibanClean || "",
+        us_account_number: hasUsAch ? usAcct : null,
+        us_routing_number: hasUsAch ? usRoute : null,
         gocardless_id: gocardlessCustomerId,
       })
       .select()

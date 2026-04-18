@@ -38,7 +38,7 @@ const MandatesPage = () => {
       toast.success('Mandate created successfully!', {
         description: result?.approval_url
           ? 'Open the new tab to complete customer authorization (if the browser blocked it, check the popup).'
-          : 'Mandate has been recorded locally. Connect GoCardless and ensure the customer has IBAN + GoCardless sync for live mandates.',
+          : 'Mandate has been recorded locally. Connect GoCardless and ensure the customer has IBAN (SEPA) or US routing + account (ACH) plus GoCardless sync for live mandates.',
       });
       setOpen(false);
       setSelectedCustomer('');

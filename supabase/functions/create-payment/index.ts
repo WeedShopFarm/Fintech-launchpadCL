@@ -10,7 +10,26 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+      console.error("Missing env vars");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -19,11 +38,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) {
@@ -35,21 +52,17 @@ Deno.serve(async (req) => {
 
     const userId = user.id;
     const body = await req.json();
-    const { customer_id, amount, scheme = "sepa" } = body;
+    const { customer_id, amount, scheme = "sepa", mandate_id } = body;
 
-    if (!customer_id || !amount) {
+    if (!customer_id || amount == null || Number.isNaN(Number(amount))) {
       return new Response(JSON.stringify({ error: "Missing required fields: customer_id, amount" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Get business and access token
     const { data: business } = await adminClient
       .from("businesses")
       .select("id, gocardless_access_token")
@@ -77,21 +90,55 @@ Deno.serve(async (req) => {
       });
     }
 
-    let gocardlessPaymentId = null;
+    const currency = scheme === "ach" ? "USD" : "EUR";
+    let gocardlessPaymentId: string | null = null;
     let status = "pending";
+    let linkedMandateId: string | null = null;
 
     const gcApiBase =
       (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
 
-    if (business.gocardless_access_token) {
-      // For ACH collections, create payment directly
-      // For SEPA, would use mandate, but for demo, mock
-      if (scheme === "ach") {
-        // Parse IBAN or use as account
-        // For ACH, need account details, but assuming IBAN is account
-        const accountNumber = customer.iban; // Mock
-        const routingNumber = "021000021"; // Mock
+    if (scheme === "ach") {
+      if (!mandate_id) {
+        return new Response(JSON.stringify({ error: "mandate_id is required for ACH (USD) payments" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
+      const { data: mandate, error: mandateErr } = await adminClient
+        .from("mandates")
+        .select("id, gocardless_id, customer_id, business_id, status")
+        .eq("id", mandate_id)
+        .single();
+
+      if (mandateErr || !mandate) {
+        return new Response(JSON.stringify({ error: "Mandate not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (mandate.business_id !== business.id || mandate.customer_id !== customer_id) {
+        return new Response(JSON.stringify({ error: "Mandate does not belong to this customer" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!mandate.gocardless_id) {
+        return new Response(JSON.stringify({
+          error: "This mandate is not linked to GoCardless yet. Create the mandate while connected to GoCardless and complete customer approval.",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      linkedMandateId = mandate.id;
+
+      if (business.gocardless_access_token) {
+        const reference = `ach-${mandate.id.replace(/-/g, "").slice(0, 12)}`;
         const paymentResponse = await fetch(`${gcApiBase}/payments`, {
           method: "POST",
           headers: {
@@ -101,49 +148,67 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             payments: {
-              amount: Math.round(amount * 100),
-              currency: scheme === "ach" ? "USD" : "EUR",
-              reference: `Payment ${customer_id}`,
-              scheme: scheme,
-              // For ACH, beneficiary is the business account, but for collection, it's from customer
-              // Actually, for payments, it's to collect from customer
-              // Need customer bank account
-              // For demo, mock
+              amount: Math.round(Number(amount) * 100),
+              currency: "USD",
+              reference: reference.slice(0, 18),
+              links: { mandate: mandate.gocardless_id },
             },
           }),
         });
 
         if (!paymentResponse.ok) {
           const errorData = await paymentResponse.text();
-          console.error("GoCardless payment error:", errorData);
-          // Continue with mock
-        } else {
-          const paymentData = await paymentResponse.json();
-          gocardlessPaymentId = paymentData.payments.id;
-          status = "submitted";
+          console.error("GoCardless ACH payment error:", errorData);
+          return new Response(JSON.stringify({
+            error: "GoCardless rejected the payment request",
+            details: errorData.slice(0, 500),
+          }), {
+            status: 502,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
+
+        const paymentData = await paymentResponse.json();
+        gocardlessPaymentId = paymentData.payments.id;
+        status = paymentData.payments.status ?? "submitted";
+      } else {
+        return new Response(JSON.stringify({
+          error: "Business is not connected to GoCardless (missing access token). Connect GoCardless before collecting ACH.",
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
     }
 
-    // Create payment plan if not exists
-    const { data: paymentPlan } = await adminClient
+    const { data: paymentPlan, error: planErr } = await adminClient
       .from("payment_plans")
       .insert({
         customer_id,
         business_id: business.id,
         amount,
-        currency: scheme === "ach" ? "USD" : "EUR",
+        currency,
         status: "active",
+        mandate_id: linkedMandateId,
       })
       .select()
       .single();
 
+    if (planErr || !paymentPlan) {
+      console.error("payment_plans insert error:", planErr);
+      return new Response(JSON.stringify({ error: planErr?.message ?? "Failed to create payment plan" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: payment, error: paymentErr } = await adminClient
       .from("payments")
       .insert({
-        payment_plan_id: paymentPlan.id,
+        plan_id: paymentPlan.id,
         business_id: business.id,
         amount,
+        currency,
         status,
         gocardless_payment_id: gocardlessPaymentId,
       })

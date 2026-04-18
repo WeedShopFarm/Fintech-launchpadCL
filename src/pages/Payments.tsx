@@ -27,12 +27,21 @@ const PaymentsPage = () => {
   const [amount, setAmount] = useState('');
   const [scheme, setScheme] = useState('sepa');
 
-  const customerMandates = (mandates ?? []).filter((m: any) => m.customer_id === customerId && m.status === 'active');
+  const customerMandates = (mandates ?? []).filter(
+    (m: any) =>
+      m.customer_id === customerId &&
+      m.gocardless_id &&
+      !['cancelled', 'failed', 'expired'].includes(String(m.status)),
+  );
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customerId || !amount) {
       toast.error('Select a customer and enter an amount');
+      return;
+    }
+    if (scheme === 'ach' && !mandateId) {
+      toast.error('ACH requires a mandate', { description: 'Create an ACH mandate for this customer, then select it here.' });
       return;
     }
     try {
@@ -80,17 +89,23 @@ const PaymentsPage = () => {
                   </SelectContent>
                 </Select>
               </div>
-              {customerId && customerMandates.length > 0 && (
+              {customerId && (
                 <div className="space-y-2">
-                  <Label>Active Mandate</Label>
-                  <Select value={mandateId} onValueChange={setMandateId}>
-                    <SelectTrigger className="bg-muted border-border"><SelectValue placeholder="Select mandate" /></SelectTrigger>
-                    <SelectContent>
-                      {customerMandates.map((m: any) => (
-                        <SelectItem key={m.id} value={m.id}>{m.gocardless_id || m.id.slice(0, 8)} ({m.status})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>{scheme === 'ach' ? 'Mandate (required for ACH)' : 'Mandate (optional for SEPA)'}</Label>
+                  {customerMandates.length === 0 ? (
+                    <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
+                      No GoCardless-linked mandates for this customer yet. Create a mandate on the Mandates page (use ACH + US bank details for USD).
+                    </p>
+                  ) : (
+                    <Select value={mandateId} onValueChange={setMandateId}>
+                      <SelectTrigger className="bg-muted border-border"><SelectValue placeholder="Select mandate" /></SelectTrigger>
+                      <SelectContent>
+                        {customerMandates.map((m: any) => (
+                          <SelectItem key={m.id} value={m.id}>{m.gocardless_id || m.id.slice(0, 8)} ({m.status})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               )}
               <div className="space-y-2">

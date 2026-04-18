@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
 
     const { data: customer } = await adminClient
       .from("customers")
-      .select("business_id, name, email, iban, gocardless_id")
+      .select("business_id, name, email, iban, gocardless_id, us_account_number, us_routing_number")
       .eq("id", customer_id)
       .single();
 
@@ -86,36 +86,64 @@ Deno.serve(async (req) => {
     let approvalUrl: string | null = null;
 
     if (business.gocardless_access_token) {
-      const gcApiUrl = Deno.env.get("GOCARDLESS_API_URL") || "https://api-sandbox.gocardless.com";
+      const gcApiUrl =
+        (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
       try {
         let customerBankAccountId: string | null = null;
 
-        if (customer.gocardless_id && customer.iban) {
-          const ibanClean = customer.iban.replace(/\s/g, "");
-          const bankAccountResponse = await fetch(`${gcApiUrl}/customer_bank_accounts`, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${business.gocardless_access_token}`,
-              "Content-Type": "application/json",
-              "GoCardless-Version": "2015-07-06",
-            },
-            body: JSON.stringify({
-              customer_bank_accounts: {
-                account_holder_name: customer.name,
-                iban: ibanClean,
-                country_code: ibanClean.slice(0, 2).toUpperCase(),
-                currency: mandateScheme === "ach" ? "USD" : "EUR",
-                links: { customer: customer.gocardless_id },
-              },
-            }),
-          });
+        if (customer.gocardless_id) {
+          const isAch = mandateScheme === "ach";
+          const usAcct = (customer.us_account_number ?? "").replace(/\s/g, "");
+          const usRoute = (customer.us_routing_number ?? "").replace(/\s/g, "");
+          const ibanClean = (customer.iban ?? "").replace(/\s/g, "");
 
-          if (bankAccountResponse.ok) {
-            const bankAccountData = await bankAccountResponse.json();
-            customerBankAccountId = bankAccountData.customer_bank_accounts.id;
+          let bankAccountPayload: Record<string, unknown>;
+
+          if (isAch) {
+            if (!usAcct || !/^\d{9}$/.test(usRoute)) {
+              console.warn("ACH mandate requires us_account_number and 9-digit us_routing_number on the customer");
+              bankAccountPayload = {};
+            } else {
+              bankAccountPayload = {
+                account_holder_name: customer.name,
+                account_number: usAcct,
+                branch_code: usRoute,
+                country_code: "US",
+                currency: "USD",
+                account_type: "checking",
+                links: { customer: customer.gocardless_id },
+              };
+            }
+          } else if (ibanClean.length > 0) {
+            bankAccountPayload = {
+              account_holder_name: customer.name,
+              iban: ibanClean,
+              country_code: ibanClean.slice(0, 2).toUpperCase(),
+              currency: "EUR",
+              links: { customer: customer.gocardless_id },
+            };
           } else {
-            const errText = await bankAccountResponse.text();
-            console.warn("GoCardless bank account creation failed:", errText);
+            bankAccountPayload = {};
+          }
+
+          if ("links" in bankAccountPayload) {
+            const bankAccountResponse = await fetch(`${gcApiUrl}/customer_bank_accounts`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${business.gocardless_access_token}`,
+                "Content-Type": "application/json",
+                "GoCardless-Version": "2015-07-06",
+              },
+              body: JSON.stringify({ customer_bank_accounts: bankAccountPayload }),
+            });
+
+            if (bankAccountResponse.ok) {
+              const bankAccountData = await bankAccountResponse.json();
+              customerBankAccountId = bankAccountData.customer_bank_accounts.id;
+            } else {
+              const errText = await bankAccountResponse.text();
+              console.warn("GoCardless bank account creation failed:", errText);
+            }
           }
         }
 
