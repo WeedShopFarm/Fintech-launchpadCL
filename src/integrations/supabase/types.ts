@@ -503,19 +503,20 @@ export type Database = {
       }
     }
     Views: {
-      webhook_health: {
-        Row: {
-          events_24h: number | null
-          last_event_at: string | null
-          pending_24h: number | null
-          processed_24h: number | null
-          source: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       get_gocardless_token: { Args: { _business_id: string }; Returns: string }
+      get_webhook_health: {
+        Args: never
+        Returns: {
+          events_24h: number
+          last_event_at: string
+          pending_24h: number
+          processed_24h: number
+          source: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
