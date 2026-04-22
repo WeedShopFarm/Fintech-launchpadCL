@@ -14,6 +14,8 @@ import PaymentsPage from "@/pages/Payments";
 import WalletPage from "@/pages/WalletPage";
 import BankAccountsPage from "@/pages/BankAccounts";
 import PayoutsPage from "@/pages/Payouts";
+import LedgerPage from "@/pages/Ledger";
+import SettingsPage from "@/pages/Settings";
 import NotFound from "./pages/NotFound";
 import OAuthCallback from "./pages/OAuthCallback";
 
@@ -39,6 +41,8 @@ const App = () => (
               <Route path="/wallet" element={<WalletPage />} />
               <Route path="/bank-accounts" element={<BankAccountsPage />} />
               <Route path="/payouts" element={<PayoutsPage />} />
+              <Route path="/ledger" element={<LedgerPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

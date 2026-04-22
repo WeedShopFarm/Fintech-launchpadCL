@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
-import { Wallet, TrendingUp, Users, FileText, ArrowUpRight, ArrowDownRight, Loader2, Link, CheckCircle } from 'lucide-react';
-import { useWallet, useCustomers, useMandates, useLedgerEntries, useBusiness } from '@/hooks/useBusinessData';
+import { Wallet, TrendingUp, Users, FileText, ArrowUpRight, ArrowDownRight, Loader2, Link, CheckCircle, Activity } from 'lucide-react';
+import { useWallet, useCustomers, useMandates, useLedgerEntries, useBusiness, useWebhookHealth } from '@/hooks/useBusinessData';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { buildGoCardlessAuthorizeUrl } from '@/lib/gocardless';
 
@@ -78,33 +79,73 @@ const Dashboard = () => {
         <StatCard label="Active Mandates" value={(mandates?.filter((m: any) => m.status === 'active').length ?? 0).toString()} icon={FileText} />
       </div>
 
-      {/* GoCardless Connection Status */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-xl p-4 md:p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            {business?.gocardless_access_token ? (
+            {isConnected ? (
               <CheckCircle className="w-5 h-5 text-success" />
             ) : (
               <Link className="w-5 h-5 text-muted-foreground" />
             )}
             <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                {business?.gocardless_access_token ? 'GoCardless Connected' : 'Connect GoCardless'}
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                {isConnected ? 'GoCardless Connected' : 'Connect GoCardless'}
+                {business?.mode && (
+                  <Badge variant={business.mode === 'live' ? 'default' : 'secondary'} className="text-[10px] uppercase">
+                    {business.mode}
+                  </Badge>
+                )}
               </h3>
               <p className="text-xs text-muted-foreground">
-                {business?.gocardless_access_token
+                {isConnected
                   ? 'Your account is connected to GoCardless for payment processing'
-                  : 'Connect your GoCardless account to start processing payments'
-                }
+                  : 'Connect your GoCardless account to start processing payments'}
               </p>
             </div>
           </div>
-          {!business?.gocardless_access_token && (
-            <Button onClick={handleConnectGoCardless} size="sm">
-              Connect
-            </Button>
+          {!isConnected && (
+            <Button onClick={handleConnectGoCardless} size="sm">Connect</Button>
           )}
         </div>
+      </motion.div>
+
+      {/* Webhook health */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card rounded-xl p-4 md:p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Activity className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">Webhook Health (24h)</h3>
+        </div>
+        {(!webhookHealth || webhookHealth.length === 0) ? (
+          <p className="text-xs text-muted-foreground">No webhook events received in the last 24 hours.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {webhookHealth.map((h) => {
+              const total = Number(h.events_24h) || 0;
+              const processed = Number(h.processed_24h) || 0;
+              const pending = Number(h.pending_24h) || 0;
+              const rate = total > 0 ? Math.round((processed / total) * 100) : 100;
+              const healthy = pending === 0 && total > 0;
+              return (
+                <div key={h.source} className="border border-border rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground capitalize">{h.source}</span>
+                    <Badge variant={healthy ? 'default' : pending > 0 ? 'destructive' : 'secondary'} className="text-[10px]">
+                      {rate}% processed
+                    </Badge>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+                    <div><p className="text-sm font-mono text-foreground">{total}</p><p className="text-[10px] text-muted-foreground">events</p></div>
+                    <div><p className="text-sm font-mono text-success">{processed}</p><p className="text-[10px] text-muted-foreground">processed</p></div>
+                    <div><p className={`text-sm font-mono ${pending > 0 ? 'text-warning' : 'text-muted-foreground'}`}>{pending}</p><p className="text-[10px] text-muted-foreground">pending</p></div>
+                  </div>
+                  {h.last_event_at && (
+                    <p className="text-[10px] text-muted-foreground mt-2">Last: {new Date(h.last_event_at).toLocaleString()}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </motion.div>
 
       {chartData.length > 0 && (

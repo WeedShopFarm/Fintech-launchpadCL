@@ -9,13 +9,45 @@ export function useBusiness() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('businesses')
-        .select('id, name, country, owner_id, stripe_account_id, gocardless_access_token, created_at, updated_at')
+        .select('id, name, country, owner_id, stripe_account_id, mode, gocardless_token_secret_id, created_at, updated_at')
         .eq('owner_id', user!.id)
         .maybeSingle();
       if (error) throw error;
       return data;
     },
     enabled: !!user,
+  });
+}
+
+export function useUpdateBusinessMode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (mode: 'sandbox' | 'live') => {
+      const { error } = await supabase
+        .from('businesses')
+        .update({ mode })
+        .eq('owner_id', (await supabase.auth.getUser()).data.user!.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['business'] }),
+  });
+}
+
+export function useWebhookHealth() {
+  return useQuery({
+    queryKey: ['webhook_health'],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_webhook_health');
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        source: string;
+        events_24h: number;
+        processed_24h: number;
+        pending_24h: number;
+        last_event_at: string | null;
+      }>;
+    },
+    refetchInterval: 30_000,
   });
 }
 
