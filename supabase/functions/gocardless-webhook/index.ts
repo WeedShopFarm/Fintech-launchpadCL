@@ -72,6 +72,55 @@ Deno.serve(async (req) => {
     }
 
     const rawBody = await req.text();
+
+    // Verify GoCardless webhook signature (HMAC-SHA256 of raw body using webhook secret)
+    const webhookSecret = Deno.env.get("GOCARDLESS_WEBHOOK_SECRET");
+    if (!webhookSecret) {
+      console.error("Missing GOCARDLESS_WEBHOOK_SECRET");
+      return new Response(JSON.stringify({ error: "Server configuration error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const providedSig =
+      req.headers.get("Webhook-Signature") ||
+      req.headers.get("webhook-signature") ||
+      req.headers.get("Webhooks-Signature");
+
+    if (!providedSig) {
+      return new Response(JSON.stringify({ error: "Missing signature" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(webhookSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sigBuf = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+    const expectedSig = Array.from(new Uint8Array(sigBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // Constant-time comparison
+    const a = new TextEncoder().encode(expectedSig);
+    const b = new TextEncoder().encode(providedSig.trim().toLowerCase());
+    let mismatch = a.length !== b.length ? 1 : 0;
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) mismatch |= a[i] ^ b[i];
+    if (mismatch !== 0) {
+      console.warn("Invalid GoCardless webhook signature");
+      return new Response(JSON.stringify({ error: "Invalid signature" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const body = JSON.parse(rawBody) as { events?: Record<string, unknown>[] };
     if (!Array.isArray(body.events) || body.events.length === 0) {
       return new Response(JSON.stringify({ success: true, ignored: true }), {
