@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { gcApiBase, getGoCardlessToken } from "../_shared/gocardless.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,7 +53,7 @@ Deno.serve(async (req) => {
     // Get business and access token
     const { data: business } = await adminClient
       .from("businesses")
-      .select("id, gocardless_access_token")
+      .select("id, mode")
       .eq("owner_id", userId)
       .maybeSingle();
 
@@ -84,11 +85,12 @@ Deno.serve(async (req) => {
     let gocardlessPayoutId = null;
     let status = "processing";
 
-    const gcApiBase =
-      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+    const apiBase = gcApiBase(business.mode);
+    let gcToken: string | null = null;
 
     if (method === "ach") {
-      if (!business.gocardless_access_token) {
+      gcToken = await getGoCardlessToken(adminClient, business.id);
+      if (!gcToken) {
         return new Response(JSON.stringify({ error: "GoCardless access token not configured" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -106,10 +108,10 @@ Deno.serve(async (req) => {
 
       const [accountNumber, routingNumber, beneficiaryName] = parts;
 
-      const payoutResponse: Response = await fetch(`${gcApiBase}/payouts`, {
+      const payoutResponse: Response = await fetch(`${apiBase}/payouts`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${business.gocardless_access_token}`,
+          "Authorization": `Bearer ${gcToken}`,
           "Content-Type": "application/json",
           "GoCardless-Version": "2015-07-06",
         },

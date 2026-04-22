@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
             const bankAccountResponse = await fetch(`${gcApiUrl}/customer_bank_accounts`, {
               method: "POST",
               headers: {
-                "Authorization": `Bearer ${business.gocardless_access_token}`,
+                "Authorization": `Bearer ${gcToken}`,
                 "Content-Type": "application/json",
                 "GoCardless-Version": "2015-07-06",
               },
@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
           const mandateResponse = await fetch(`${gcApiUrl}/mandates`, {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${business.gocardless_access_token}`,
+              "Authorization": `Bearer ${gcToken}`,
               "Content-Type": "application/json",
               "GoCardless-Version": "2015-07-06",
             },
