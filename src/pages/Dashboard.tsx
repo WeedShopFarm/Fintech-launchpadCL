@@ -31,6 +31,8 @@ const Dashboard = () => {
   const { data: mandates } = useMandates();
   const { data: ledger, isLoading: lLoading } = useLedgerEntries();
   const { data: business } = useBusiness();
+  const { data: webhookHealth } = useWebhookHealth();
+  const isConnected = !!business?.gocardless_token_secret_id;
 
   const handleConnectGoCardless = () => {
     const clientId = import.meta.env.VITE_GOCARDLESS_CLIENT_ID;
