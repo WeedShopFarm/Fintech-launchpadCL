@@ -123,6 +123,10 @@ export type Database = {
           iban: string
           id: string
           name: string
+          stripe_customer_id: string | null
+          stripe_us_bank_payment_method_id: string | null
+          us_account_number: string | null
+          us_routing_number: string | null
         }
         Insert: {
           business_id: string
@@ -131,6 +135,10 @@ export type Database = {
           iban?: string
           id?: string
           name: string
+          stripe_customer_id?: string | null
+          stripe_us_bank_payment_method_id?: string | null
+          us_account_number?: string | null
+          us_routing_number?: string | null
         }
         Update: {
           business_id?: string
@@ -139,6 +147,10 @@ export type Database = {
           iban?: string
           id?: string
           name?: string
+          stripe_customer_id?: string | null
+          stripe_us_bank_payment_method_id?: string | null
+          us_account_number?: string | null
+          us_routing_number?: string | null
         }
         Relationships: [
           {
