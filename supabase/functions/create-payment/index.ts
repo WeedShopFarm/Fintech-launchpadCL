@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.25.0?target=deno";
+import { gcApiBase, getGoCardlessToken } from "../_shared/gocardless.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
 
     const { data: business } = await adminClient
       .from("businesses")
-      .select("id, gocardless_access_token")
+      .select("id, mode")
       .eq("owner_id", userId)
       .maybeSingle();
 
@@ -96,8 +97,7 @@ Deno.serve(async (req) => {
     let status = "pending";
     let linkedMandateId: string | null = null;
 
-    const gcApiBase =
-      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+    const apiBase = gcApiBase(business.mode);
 
     if (scheme === "ach_stripe") {
       const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
@@ -227,12 +227,13 @@ Deno.serve(async (req) => {
 
       linkedMandateId = mandate.id;
 
-      if (business.gocardless_access_token) {
+      const gcToken = await getGoCardlessToken(adminClient, business.id);
+      if (gcToken) {
         const reference = `ach-${mandate.id.replace(/-/g, "").slice(0, 12)}`;
-        const paymentResponse = await fetch(`${gcApiBase}/payments`, {
+        const paymentResponse = await fetch(`${apiBase}/payments`, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${business.gocardless_access_token}`,
+            "Authorization": `Bearer ${gcToken}`,
             "Content-Type": "application/json",
             "GoCardless-Version": "2015-07-06",
           },

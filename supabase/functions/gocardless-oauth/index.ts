@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { gcApiBase, gcOauthCreds } from "../_shared/gocardless.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,115 +7,75 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      console.error("Missing env vars");
-      return new Response(JSON.stringify({ error: "Server configuration error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "Server configuration error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const supabase = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
+    const supabase = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const body = await req.json();
-    const { code } = body;
-
+    const { code } = await req.json();
     if (!code) {
-      return new Response(JSON.stringify({ error: "Authorization code required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "Authorization code required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
-
     const { data: business, error: businessError } = await adminClient
       .from("businesses")
-      .select("id")
+      .select("id, mode")
       .eq("owner_id", user.id)
       .single();
 
     if (businessError || !business) {
-      return new Response(JSON.stringify({ error: "Business not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(JSON.stringify({ error: "Business not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const apiBase =
-      (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
-
-    const tokenResponse = await fetch(`${apiBase}/oauth/access_token`, {
+    const creds = gcOauthCreds(business.mode);
+    const tokenResponse = await fetch(`${gcApiBase(business.mode)}/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        client_id: Deno.env.get("GOCARDLESS_CLIENT_ID"),
-        client_secret: Deno.env.get("GOCARDLESS_CLIENT_SECRET"),
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         code,
         grant_type: "authorization_code",
-        redirect_uri: Deno.env.get("GOCARDLESS_REDIRECT_URI"),
+        redirect_uri: creds.redirectUri,
       }),
     });
 
     if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.text();
-      console.error("Token exchange failed:", errorData);
-      return new Response(JSON.stringify({ error: "Failed to exchange authorization code" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.error("Token exchange failed:", await tokenResponse.text());
+      return new Response(JSON.stringify({ error: "Failed to exchange authorization code" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const tokenData = await tokenResponse.json();
 
-    const { error: updateError } = await adminClient
-      .from("businesses")
-      .update({
-        gocardless_access_token: tokenData.access_token,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", business.id);
+    // Store token in Vault via SECURITY DEFINER function
+    const { error: rpcErr } = await adminClient.rpc("set_gocardless_token", {
+      _business_id: business.id,
+      _token: tokenData.access_token,
+    });
 
-    if (updateError) {
-      console.error("Failed to store access token:", updateError);
-      return new Response(JSON.stringify({ error: "Failed to save access token" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (rpcErr) {
+      console.error("Failed to store access token in Vault:", rpcErr);
+      return new Response(JSON.stringify({ error: "Failed to save access token" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ success: true, message: "GoCardless connected successfully" }), {
@@ -122,9 +83,6 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error("OAuth function error:", error);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

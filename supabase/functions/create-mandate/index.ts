@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { gcApiBase, getGoCardlessToken } from "../_shared/gocardless.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,7 +71,7 @@ Deno.serve(async (req) => {
 
     const { data: business } = await adminClient
       .from("businesses")
-      .select("id, gocardless_access_token")
+      .select("id, mode")
       .eq("id", customer.business_id)
       .single();
 
@@ -85,9 +86,9 @@ Deno.serve(async (req) => {
     let gocardlessId: string | null = null;
     let approvalUrl: string | null = null;
 
-    if (business.gocardless_access_token) {
-      const gcApiUrl =
-        (Deno.env.get("GOCARDLESS_API_URL") ?? "").replace(/\/$/, "") || "https://api-sandbox.gocardless.com";
+    const gcToken = await getGoCardlessToken(adminClient, business.id);
+    if (gcToken) {
+      const gcApiUrl = gcApiBase(business.mode);
       try {
         let customerBankAccountId: string | null = null;
 
