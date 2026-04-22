@@ -134,25 +134,31 @@ Deno.serve(async (req) => {
     for (const event of events) {
       const resourceType = String(event.resource_type ?? "unknown");
       const action = String(event.action ?? event.event_type ?? "unknown");
-      const externalId = typeof event.id === "string" ? event.id : undefined;
+      const externalId = typeof event.id === "string" ? event.id : null;
 
-      if (externalId) {
-        const { data: existing } = await supabase
-          .from("webhook_events")
-          .select("id")
-          .eq("source", "gocardless")
-          .eq("external_id", externalId)
-          .maybeSingle();
-        if (existing) continue;
+      if (!externalId) {
+        // Cannot dedupe without an id — skip
+        continue;
       }
 
-      await supabase.from("webhook_events").insert({
+      // Idempotent insert: unique (source, external_id) constraint rejects duplicates atomically
+      const { error: insErr } = await supabase.from("webhook_events").insert({
         source: "gocardless",
         event_type: `${resourceType}.${action}`,
         payload: event,
-        external_id: externalId ?? null,
+        external_id: externalId,
         processed: false,
       });
+
+      if (insErr) {
+        const code = (insErr as { code?: string }).code;
+        if (code === "23505" || String(insErr.message ?? "").includes("duplicate")) {
+          // Already processed
+          continue;
+        }
+        console.error("webhook_events insert error:", insErr);
+        continue;
+      }
 
       if (resourceType === "mandates") {
         const mid = mandateGcId(event);
@@ -170,13 +176,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (externalId) {
-        await supabase
-          .from("webhook_events")
-          .update({ processed: true })
-          .eq("source", "gocardless")
-          .eq("external_id", externalId);
-      }
+      await supabase
+        .from("webhook_events")
+        .update({ processed: true })
+        .eq("source", "gocardless")
+        .eq("external_id", externalId);
     }
 
     return new Response(JSON.stringify({ success: true }), {

@@ -60,7 +60,9 @@ export type Database = {
           country: string
           created_at: string
           gocardless_access_token: string | null
+          gocardless_token_secret_id: string | null
           id: string
+          mode: string
           name: string
           owner_id: string
           stripe_account_id: string | null
@@ -70,7 +72,9 @@ export type Database = {
           country?: string
           created_at?: string
           gocardless_access_token?: string | null
+          gocardless_token_secret_id?: string | null
           id?: string
+          mode?: string
           name: string
           owner_id: string
           stripe_account_id?: string | null
@@ -80,7 +84,9 @@ export type Database = {
           country?: string
           created_at?: string
           gocardless_access_token?: string | null
+          gocardless_token_secret_id?: string | null
           id?: string
+          mode?: string
           name?: string
           owner_id?: string
           stripe_account_id?: string | null
@@ -500,12 +506,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_gocardless_token: { Args: { _business_id: string }; Returns: string }
+      get_webhook_health: {
+        Args: never
+        Returns: {
+          events_24h: number
+          last_event_at: string
+          pending_24h: number
+          processed_24h: number
+          source: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      set_gocardless_token: {
+        Args: { _business_id: string; _token: string }
+        Returns: undefined
       }
     }
     Enums: {
